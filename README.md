@@ -8,13 +8,6 @@ It helps defenders identify suspicious Linux authentication activity, including 
 
 Sigma provides the open detection-rule format. LoginHunt adds authentication-focused rules, sample logs, a Python runner, basic correlation logic, and a reproducible test workflow.
 
-This security tool supports the **Security Analytics & Defensive Operations** theme, especially in:
-
-- Detection engineering
-- Threat hunting
-- SOC workflow support
-- Authentication log analysis
-
 ---
 
 ## Table of Contents
@@ -29,9 +22,8 @@ This security tool supports the **Security Analytics & Defensive Operations** th
 8. [Validation and Testing](#validation-and-testing)
 9. [Evaluation](#evaluation)
 10. [Known Issues and Limitations](#known-issues-and-limitations)
-11. [Future Work](#future-work)
-12. [Safety and Ethics](#safety-and-ethics)
-13. [Author](#author)
+11. [Safety and Ethics](#safety-and-ethics)
+12. [Author](#author)
 
 ---
 
@@ -68,8 +60,7 @@ Common approaches for reviewing authentication activity include:
 - SIEM platforms such as Splunk, Elastic, Microsoft Sentinel, and QRadar
 - Sigma rules for vendor-neutral detection logic
 
-These tools are useful, but they may be too large or complex for a focused classroom security tool. LoginHunt provides a smaller and easier-to-reproduce workflow for learning and demonstrating authentication threat detection.
-
+These tools are useful, but they often require significant infrastructure and configuration. LoginHunt provides a focused, reproducible workflow for testing Sigma-style authentication detections, reviewing suspicious login activity, and preparing detection logic that can later be adapted for production monitoring environments.
 ### Gap Filled by LoginHunt
 
 LoginHunt fills the gap between raw log review and full SIEM deployment.
@@ -82,8 +73,7 @@ It provides a focused environment for:
 - Demonstrating severity-based prioritization
 - Showing how simple correlation can improve detection value
 
-LoginHunt is not intended to replace a full SIEM. It is a lightweight defensive security tool for detection engineering practice and reproducible demonstration.
-
+LoginHunt complements larger SIEM and security monitoring platforms by providing a focused workflow for developing, testing, and validating authentication threat detections. Its lightweight design makes it useful for evaluating Sigma-style rules, analyzing authentication events, and prioritizing suspicious login behavior before adapting the logic for production environments.
 ---
 
 ## System Design
@@ -185,7 +175,6 @@ loginhunt-sigma-auth-detections/
     └── test_expected_output.sh
 ```
 
-All required documentation for this security tool is contained in this `README.md`.
 ---
 
 ## Installation
@@ -452,23 +441,6 @@ LoginHunt is a lightweight defensive security tool and has several limitations:
 - Some detections may produce false positives in normal administrative environments.
 
 In a production environment, Sigma rules would normally be converted to a backend SIEM query format and tested against real log data.
-
----
-
-## Future Work
-
-Possible improvements include:
-
-- Add support for more Sigma rule modifiers
-- Parse real Linux `/var/log/auth.log` files
-- Export findings to JSON or CSV
-- Generate an HTML report
-- Add Windows authentication event detections
-- Add more MITRE ATT&CK mappings
-- Add time-window based brute-force detection
-- Add unit tests with `pytest`
-- Add GitHub Actions for automatic rule validation
-- Convert Sigma rules to SIEM backend queries
 
 ---
 
