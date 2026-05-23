@@ -74,6 +74,7 @@ It provides a focused environment for:
 - Showing how simple correlation can improve detection value
 
 LoginHunt complements larger SIEM and security monitoring platforms by providing a focused workflow for developing, testing, and validating authentication threat detections. Its lightweight design makes it useful for evaluating Sigma-style rules, analyzing authentication events, and prioritizing suspicious login behavior before adapting the logic for production environments.
+
 ---
 
 ## System Design
