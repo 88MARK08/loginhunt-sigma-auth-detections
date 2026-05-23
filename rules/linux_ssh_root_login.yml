@@ -1,0 +1,21 @@
+title: Successful SSH Login As Root
+id: 0e3e5a3f-37f6-43f1-8f23-9a96d0010002
+status: experimental
+description: Detects a successful SSH login as the root user.
+author: Vivian Onyinye Uba
+date: 2026-05-21
+logsource:
+    product: linux
+    service: sshd
+detection:
+    selection:
+        message|contains|all:
+            - 'Accepted'
+            - 'root'
+    condition: selection
+falsepositives:
+    - Administrative maintenance where root SSH login is intentionally allowed
+level: high
+tags:
+    - attack.initial-access
+    - attack.t1078

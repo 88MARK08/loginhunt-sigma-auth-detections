@@ -1,0 +1,25 @@
+Expected LoginHunt findings:
+
+Events analyzed: 11
+Sigma rules loaded: 5
+Total findings: 14
+
+High severity findings:
+1. Successful SSH Login As Root
+2. New Local User Created
+3. Successful SSH Login After Multiple Failures
+4. Multiple Usernames Attempted From Same Source IP
+
+Medium severity findings:
+5. Failed SSH Login Attempt - admin from 203.0.113.80
+6. Failed SSH Login Attempt - admin from 203.0.113.80
+7. Failed SSH Login Attempt - admin from 203.0.113.80
+8. Failed Sudo Attempt - bob
+9. Failed SSH Login Attempt - test from 192.0.2.77
+10. Failed SSH Login Attempt - oracle from 192.0.2.77
+11. Failed SSH Login Attempt - guest from 192.0.2.77
+
+Low severity findings:
+12. Successful SSH Login - alice
+13. Successful SSH Login - root
+14. Successful SSH Login - admin

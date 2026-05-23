@@ -1,0 +1,18 @@
+title: Failed Sudo Attempt
+id: 0e3e5a3f-37f6-43f1-8f23-9a96d0010003
+status: experimental
+description: Detects failed sudo authentication attempts.
+author: Vivian Onyinye Uba
+date: 2026-05-21
+logsource:
+    product: linux
+    service: sudo
+detection:
+    selection:
+        message|contains: 'authentication failure'
+    condition: selection
+falsepositives:
+    - User typed the wrong sudo password
+level: medium
+tags:
+    - attack.privilege-escalation

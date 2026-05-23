@@ -1,0 +1,20 @@
+title: Failed SSH Login Attempt
+id: 0e3e5a3f-37f6-43f1-8f23-9a96d0010001
+status: experimental
+description: Detects failed SSH password authentication attempts.
+author: Vivian Onyinye Uba
+date: 2026-05-21
+logsource:
+    product: linux
+    service: sshd
+detection:
+    selection:
+        message|contains: 'Failed password'
+    condition: selection
+falsepositives:
+    - User mistyped password
+    - Expired password or normal login error
+level: medium
+tags:
+    - attack.credential-access
+    - attack.t1110

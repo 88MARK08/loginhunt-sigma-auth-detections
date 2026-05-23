@@ -1,0 +1,21 @@
+title: New Local User Created
+id: 0e3e5a3f-37f6-43f1-8f23-9a96d0010004
+status: experimental
+description: Detects creation of a new local Linux user account.
+author: Vivian Onyinye Uba
+date: 2026-05-21
+logsource:
+    product: linux
+    service: auth
+detection:
+    selection:
+        message|contains:
+            - 'new user'
+            - 'useradd'
+    condition: selection
+falsepositives:
+    - Authorized administrator account creation
+level: high
+tags:
+    - attack.persistence
+    - attack.t1136

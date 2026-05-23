@@ -1,0 +1,19 @@
+title: Successful SSH Login
+id: 0e3e5a3f-37f6-43f1-8f23-9a96d0010005
+status: experimental
+description: Detects successful SSH login activity.
+author: Vivian Onyinye Uba
+date: 2026-05-21
+logsource:
+    product: linux
+    service: sshd
+detection:
+    selection:
+        message|contains: 'Accepted password'
+    condition: selection
+falsepositives:
+    - Normal user login
+level: low
+tags:
+    - attack.initial-access
+    - attack.t1078

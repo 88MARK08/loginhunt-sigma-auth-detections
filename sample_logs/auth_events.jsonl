@@ -1,0 +1,11 @@
+{"timestamp":"2026-05-21T08:00:00","host":"server1","service":"sshd","source_ip":"198.51.100.10","user":"alice","message":"Accepted password for alice from 198.51.100.10 port 55320 ssh2"}
+{"timestamp":"2026-05-21T08:03:00","host":"server1","service":"sshd","source_ip":"203.0.113.50","user":"root","message":"Accepted password for root from 203.0.113.50 port 44444 ssh2"}
+{"timestamp":"2026-05-21T08:05:00","host":"server1","service":"sshd","source_ip":"203.0.113.80","user":"admin","message":"Failed password for admin from 203.0.113.80 port 55555 ssh2"}
+{"timestamp":"2026-05-21T08:06:00","host":"server1","service":"sshd","source_ip":"203.0.113.80","user":"admin","message":"Failed password for admin from 203.0.113.80 port 55556 ssh2"}
+{"timestamp":"2026-05-21T08:07:00","host":"server1","service":"sshd","source_ip":"203.0.113.80","user":"admin","message":"Failed password for admin from 203.0.113.80 port 55557 ssh2"}
+{"timestamp":"2026-05-21T08:08:00","host":"server1","service":"sshd","source_ip":"203.0.113.80","user":"admin","message":"Accepted password for admin from 203.0.113.80 port 55558 ssh2"}
+{"timestamp":"2026-05-21T08:12:00","host":"server1","service":"sudo","source_ip":"local","user":"bob","message":"pam_unix(sudo:auth): authentication failure; user=bob"}
+{"timestamp":"2026-05-21T08:15:00","host":"server1","service":"auth","source_ip":"local","user":"root","message":"useradd: new user: name=backupadmin, UID=1002, GID=1002"}
+{"timestamp":"2026-05-21T08:20:00","host":"server1","service":"sshd","source_ip":"192.0.2.77","user":"test","message":"Failed password for test from 192.0.2.77 port 60001 ssh2"}
+{"timestamp":"2026-05-21T08:21:00","host":"server1","service":"sshd","source_ip":"192.0.2.77","user":"oracle","message":"Failed password for oracle from 192.0.2.77 port 60002 ssh2"}
+{"timestamp":"2026-05-21T08:22:00","host":"server1","service":"sshd","source_ip":"192.0.2.77","user":"guest","message":"Failed password for guest from 192.0.2.77 port 60003 ssh2"}
