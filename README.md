@@ -455,6 +455,12 @@ Only use this tool on systems, logs, or datasets that you are authorized to anal
 
 ---
 
+## Declaration of Generative AI Usage:
+
+During the development of this security tool, ChatGPT was used for editing, grammar enhancement, and the generation of artificial or synthetic examples. After using these outputs, the author reviewed, revised, and edited the content as needed and takes full responsibility for the final work.
+
+---
+
 ## Author
 
 **Markjoe Uba**
