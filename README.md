@@ -445,13 +445,13 @@ In a production environment, Sigma rules would normally be converted to a backen
 
 ---
 
-## Safety and Ethics
+## Responsible Use
 
-LoginHunt is designed for defensive security education and detection engineering.
+LoginHunt is intended for authorized defensive security work, including authentication log analysis, detection testing, and security monitoring.
 
-The sample logs are synthetic and do not contain real credentials, real user data, or real attack infrastructure.
+The sample logs included in this repository are synthetic and do not contain real credentials, real users, or real attack infrastructure.
 
-This security tool should be used only for authorized defensive analysis, testing, education, and security monitoring.
+Only use this tool on systems, logs, or datasets that you are authorized to analyze.
 
 ---
 
