@@ -1,63 +1,172 @@
 #!/usr/bin/env python3
+"""
+LoginHunt: lightweight Sigma-style authentication threat detector.
+
+Supported input:
+- JSONL authentication events
+- Native Linux auth.log / secure-style logs
+- journalctl-style text logs
+- Standard input through "-"
+"""
+
+from __future__ import annotations
 
 import argparse
-import json
+import sys
 from collections import defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import yaml
 
-
-def load_jsonl(path):
-    events = []
-    with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                events.append(json.loads(line))
-    return events
+from parsers import LoginHuntInputError, iter_events
 
 
-def load_rules(rules_dir):
-    rules = []
-    for rule_file in sorted(Path(rules_dir).glob("*.yml")):
-        with open(rule_file, "r", encoding="utf-8") as f:
-            rule = yaml.safe_load(f)
-            rule["_file"] = str(rule_file)
-            rules.append(rule)
+LEVEL_RANK = {
+    "informational": 0,
+    "low": 1,
+    "medium": 2,
+    "high": 3,
+    "critical": 4,
+}
+
+
+def load_config(path: str) -> dict[str, Any]:
+    """Load LoginHunt settings from a YAML file."""
+
+    config_path = Path(path)
+
+    try:
+        with config_path.open("r", encoding="utf-8") as config_file:
+            config = yaml.safe_load(config_file) or {}
+    except FileNotFoundError as exc:
+        raise LoginHuntInputError(
+            f"Configuration file was not found: {config_path}"
+        ) from exc
+    except PermissionError as exc:
+        raise LoginHuntInputError(
+            f"Permission denied while reading configuration: {config_path}"
+        ) from exc
+    except yaml.YAMLError as exc:
+        raise LoginHuntInputError(
+            f"Configuration file is not valid YAML: {config_path}\n{exc}"
+        ) from exc
+
+    if not isinstance(config, dict):
+        raise LoginHuntInputError(
+            f"Configuration must contain a YAML mapping: {config_path}"
+        )
+
+    return config
+
+
+def load_rules(rules_dir: str) -> list[dict[str, Any]]:
+    """Load Sigma YAML rules from the rules directory."""
+
+    directory = Path(rules_dir)
+
+    if not directory.exists():
+        raise LoginHuntInputError(
+            f"Rules directory was not found: {directory}"
+        )
+
+    if not directory.is_dir():
+        raise LoginHuntInputError(
+            f"Rules path is not a directory: {directory}"
+        )
+
+    rule_files = sorted(
+        list(directory.glob("*.yml"))
+        + list(directory.glob("*.yaml"))
+    )
+
+    if not rule_files:
+        raise LoginHuntInputError(
+            f"No .yml or .yaml rule files were found in: {directory}"
+        )
+
+    rules: list[dict[str, Any]] = []
+
+    for rule_file in rule_files:
+        try:
+            with rule_file.open("r", encoding="utf-8") as file_handle:
+                rule = yaml.safe_load(file_handle)
+        except PermissionError as exc:
+            raise LoginHuntInputError(
+                f"Permission denied while reading rule: {rule_file}"
+            ) from exc
+        except yaml.YAMLError as exc:
+            raise LoginHuntInputError(
+                f"Rule file is not valid YAML: {rule_file}\n{exc}"
+            ) from exc
+
+        if not isinstance(rule, dict):
+            raise LoginHuntInputError(
+                f"Rule file must contain a YAML mapping: {rule_file}"
+            )
+
+        if "title" not in rule or "detection" not in rule:
+            raise LoginHuntInputError(
+                "Rule is missing a required title or detection section: "
+                f"{rule_file}"
+            )
+
+        rule["_file"] = str(rule_file)
+        rules.append(rule)
+
     return rules
 
 
-def contains_match(value, expected):
-    value = str(value)
+def contains_match(value: Any, expected: Any) -> bool:
+    """Return True when the value contains an expected item."""
+
+    actual = str(value)
 
     if isinstance(expected, str):
-        return expected in value
+        return expected in actual
 
     if isinstance(expected, list):
-        return any(item in value for item in expected)
+        return any(str(item) in actual for item in expected)
 
     return False
 
 
-def contains_all_match(value, expected):
-    value = str(value)
+def contains_all_match(value: Any, expected: Any) -> bool:
+    """Return True when the value contains every expected item."""
+
+    actual = str(value)
 
     if isinstance(expected, list):
-        return all(item in value for item in expected)
+        return all(str(item) in actual for item in expected)
 
-    return str(expected) in value
+    return str(expected) in actual
 
 
-def event_matches_rule(event, rule):
+def event_matches_rule(
+    event: dict[str, Any],
+    rule: dict[str, Any],
+) -> bool:
+    """
+    Apply the Sigma subset supported by LoginHunt.
+
+    Supported forms:
+    - field: value
+    - field|contains: value
+    - field|contains: [value1, value2]
+    - field|contains|all: [value1, value2]
+    """
+
     detection = rule.get("detection", {})
     selection = detection.get("selection", {})
 
-    for field_expr, expected in selection.items():
-        parts = field_expr.split("|")
+    if not isinstance(selection, dict):
+        return False
+
+    for field_expression, expected in selection.items():
+        parts = field_expression.split("|")
         field = parts[0]
         modifiers = parts[1:]
-
         actual = event.get(field, "")
 
         if modifiers == ["contains"]:
@@ -68,26 +177,34 @@ def event_matches_rule(event, rule):
             if not contains_all_match(actual, expected):
                 return False
 
-        else:
-            if actual != expected:
+        elif modifiers:
+            # LoginHunt does not yet support other Sigma modifiers.
+            return False
+
+        elif isinstance(expected, list):
+            if actual not in expected:
                 return False
+
+        elif actual != expected:
+            return False
 
     return True
 
 
-def severity_rank(level):
-    levels = {
-        "informational": 0,
-        "low": 1,
-        "medium": 2,
-        "high": 3,
-        "critical": 4,
-    }
-    return levels.get(str(level).lower(), 0)
+def severity_rank(level: Any) -> int:
+    """Convert a severity label into a sortable number."""
+
+    return LEVEL_RANK.get(str(level).lower(), 0)
 
 
-def print_finding(rule, event, reason=None):
-    level = rule.get("level", "informational").upper()
+def print_finding(
+    rule: dict[str, Any],
+    event: dict[str, Any],
+    reason: str | None = None,
+) -> None:
+    """Print one SOC-style finding."""
+
+    level = str(rule.get("level", "informational")).upper()
     title = rule.get("title", "Untitled Rule")
     user = event.get("user", "unknown")
     source_ip = event.get("source_ip", "unknown")
@@ -108,8 +225,13 @@ def print_finding(rule, event, reason=None):
     print("")
 
 
-def run_sigma_style_rules(events, rules):
-    findings = []
+def run_sigma_style_rules(
+    events: list[dict[str, Any]],
+    rules: list[dict[str, Any]],
+) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    """Apply all loaded Sigma-style rules to all events."""
+
+    findings: list[tuple[dict[str, Any], dict[str, Any]]] = []
 
     for event in events:
         for rule in rules:
@@ -119,93 +241,354 @@ def run_sigma_style_rules(events, rules):
     return findings
 
 
-def run_correlation_logic(events):
+def event_epoch(event: dict[str, Any]) -> float | None:
+    """Return a comparable epoch timestamp when available."""
+
+    value = event.get("_dt")
+
+    if not isinstance(value, datetime):
+        return None
+
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+
+    return value.timestamp()
+
+
+def within_window(
+    previous_event: dict[str, Any],
+    current_event: dict[str, Any],
+    window_seconds: int,
+) -> bool:
+    """Check whether two ordered events occur within a time window."""
+
+    previous_time = event_epoch(previous_event)
+    current_time = event_epoch(current_event)
+
+    # Preserve ordered-event behavior if a timestamp could not be parsed.
+    if previous_time is None or current_time is None:
+        return True
+
+    difference = current_time - previous_time
+    return 0 <= difference <= window_seconds
+
+
+def get_correlation_setting(
+    config: dict[str, Any],
+    name: str,
+    defaults: dict[str, Any],
+) -> dict[str, Any]:
+    """Return one correlation section with defaults applied."""
+
+    correlation = config.get("correlation", {})
+
+    if not isinstance(correlation, dict):
+        correlation = {}
+
+    configured = correlation.get(name, {})
+
+    if not isinstance(configured, dict):
+        configured = {}
+
+    result = defaults.copy()
+    result.update(configured)
+    return result
+
+
+def run_correlation_logic(
+    events: list[dict[str, Any]],
+    config: dict[str, Any],
+) -> list[tuple[dict[str, Any], dict[str, Any], str]]:
     """
-    This part adds SOC-style correlation on top of simple Sigma-style matching.
+    Detect correlated authentication behavior.
 
-    It detects:
-    1. Successful login after 3 or more failed logins from the same IP/user.
-    2. One source IP trying 3 or more different usernames.
+    Correlations:
+    - Repeated SSH login failures
+    - Successful SSH login after multiple failures
+    - Multiple usernames attempted from one source IP
     """
 
-    findings = []
+    repeated_settings = get_correlation_setting(
+        config,
+        "repeated_failures",
+        {
+            "enabled": True,
+            "threshold": 5,
+            "window_seconds": 300,
+            "level": "high",
+        },
+    )
 
-    failed_by_ip_user = defaultdict(int)
-    users_by_ip = defaultdict(set)
+    success_settings = get_correlation_setting(
+        config,
+        "success_after_failures",
+        {
+            "enabled": True,
+            "threshold": 3,
+            "window_seconds": 600,
+            "level": "high",
+        },
+    )
 
-    correlation_rule_success_after_failures = {
+    username_settings = get_correlation_setting(
+        config,
+        "multiple_usernames",
+        {
+            "enabled": True,
+            "threshold": 3,
+            "window_seconds": 300,
+            "level": "high",
+        },
+    )
+
+    allowlists = config.get("allowlists", {})
+
+    if not isinstance(allowlists, dict):
+        allowlists = {}
+
+    allowlisted_users = {
+        str(value) for value in allowlists.get("users", [])
+    }
+    allowlisted_ips = {
+        str(value) for value in allowlists.get("source_ips", [])
+    }
+
+    failed_by_ip_user: dict[
+        tuple[str, str],
+        list[dict[str, Any]],
+    ] = defaultdict(list)
+
+    attempts_by_ip: dict[
+        str,
+        list[dict[str, Any]],
+    ] = defaultdict(list)
+
+    findings: list[
+        tuple[dict[str, Any], dict[str, Any], str]
+    ] = []
+
+    reported_repeated: set[tuple[str, str]] = set()
+    reported_multiple_users: set[str] = set()
+
+    repeated_rule = {
+        "title": "Repeated SSH Login Failures",
+        "level": str(repeated_settings.get("level", "high")),
+        "_file": "correlation:repeated_failures",
+    }
+
+    success_rule = {
         "title": "Successful SSH Login After Multiple Failures",
-        "level": "high",
+        "level": str(success_settings.get("level", "high")),
         "_file": "correlation:success_after_failures",
     }
 
-    correlation_rule_multiple_users = {
+    multiple_users_rule = {
         "title": "Multiple Usernames Attempted From Same Source IP",
-        "level": "high",
-        "_file": "correlation:multiple_usernames_same_ip",
+        "level": str(username_settings.get("level", "high")),
+        "_file": "correlation:multiple_usernames",
     }
 
-    reported_multiple_user_ip = set()
-
     for event in events:
-        message = event.get("message", "")
-        source_ip = event.get("source_ip", "unknown")
-        user = event.get("user", "unknown")
+        message = str(event.get("message", ""))
+        source_ip = str(event.get("source_ip", "unknown"))
+        user = str(event.get("user", "unknown"))
 
-        if "Failed password" in message:
-            failed_by_ip_user[(source_ip, user)] += 1
-            users_by_ip[source_ip].add(user)
+        if user in allowlisted_users or source_ip in allowlisted_ips:
+            continue
 
-            if len(users_by_ip[source_ip]) >= 3 and source_ip not in reported_multiple_user_ip:
-                findings.append(
-                    (
-                        correlation_rule_multiple_users,
-                        event,
-                        f"Source IP {source_ip} attempted logins for multiple usernames: "
-                        f"{', '.join(sorted(users_by_ip[source_ip]))}",
-                    )
+        is_failure = (
+            "Failed password" in message
+            or (
+                event.get("service") == "sshd"
+                and event.get("status") == "failure"
+            )
+        )
+
+        is_success = (
+            "Accepted password" in message
+            or "Accepted publickey" in message
+            or (
+                event.get("service") == "sshd"
+                and event.get("status") == "success"
+            )
+        )
+
+        if is_failure:
+            key = (source_ip, user)
+
+            repeated_window = int(
+                repeated_settings.get("window_seconds", 300)
+            )
+
+            failed_by_ip_user[key] = [
+                previous
+                for previous in failed_by_ip_user[key]
+                if within_window(previous, event, repeated_window)
+            ]
+            failed_by_ip_user[key].append(event)
+
+            username_window = int(
+                username_settings.get("window_seconds", 300)
+            )
+
+            attempts_by_ip[source_ip] = [
+                previous
+                for previous in attempts_by_ip[source_ip]
+                if within_window(previous, event, username_window)
+            ]
+            attempts_by_ip[source_ip].append(event)
+
+            if bool(repeated_settings.get("enabled", True)):
+                threshold = int(
+                    repeated_settings.get("threshold", 5)
                 )
-                reported_multiple_user_ip.add(source_ip)
 
-        if "Accepted password" in message:
-            previous_failures = failed_by_ip_user[(source_ip, user)]
+                if (
+                    len(failed_by_ip_user[key]) >= threshold
+                    and key not in reported_repeated
+                ):
+                    findings.append(
+                        (
+                            repeated_rule,
+                            event,
+                            f"Source IP {source_ip} generated "
+                            f"{len(failed_by_ip_user[key])} failed SSH "
+                            f"logins for user {user} within "
+                            f"{repeated_window} seconds.",
+                        )
+                    )
+                    reported_repeated.add(key)
 
-            if previous_failures >= 3:
+            if bool(username_settings.get("enabled", True)):
+                distinct_users = {
+                    str(item.get("user", "unknown"))
+                    for item in attempts_by_ip[source_ip]
+                }
+
+                threshold = int(
+                    username_settings.get("threshold", 3)
+                )
+
+                if (
+                    len(distinct_users) >= threshold
+                    and source_ip not in reported_multiple_users
+                ):
+                    findings.append(
+                        (
+                            multiple_users_rule,
+                            event,
+                            f"Source IP {source_ip} attempted "
+                            f"{len(distinct_users)} usernames within "
+                            f"{username_window} seconds: "
+                            f"{', '.join(sorted(distinct_users))}.",
+                        )
+                    )
+                    reported_multiple_users.add(source_ip)
+
+        if is_success and bool(
+            success_settings.get("enabled", True)
+        ):
+            key = (source_ip, user)
+            success_window = int(
+                success_settings.get("window_seconds", 600)
+            )
+
+            recent_failures = [
+                previous
+                for previous in failed_by_ip_user[key]
+                if within_window(previous, event, success_window)
+            ]
+
+            threshold = int(
+                success_settings.get("threshold", 3)
+            )
+
+            if len(recent_failures) >= threshold:
                 findings.append(
                     (
-                        correlation_rule_success_after_failures,
+                        success_rule,
                         event,
-                        f"User {user} successfully logged in after {previous_failures} failed attempts "
-                        f"from {source_ip}.",
+                        f"User {user} successfully logged in after "
+                        f"{len(recent_failures)} failed attempts from "
+                        f"{source_ip} within {success_window} seconds.",
                     )
                 )
 
     return findings
 
 
-def main():
+def build_argument_parser() -> argparse.ArgumentParser:
+    """Create the LoginHunt command-line interface."""
+
     parser = argparse.ArgumentParser(
-        description="LoginHunt: Lightweight Sigma-based authentication threat detector"
+        description=(
+            "LoginHunt: Sigma-style Linux authentication "
+            "threat detector"
+        )
     )
-    parser.add_argument("log_file", help="Path to JSONL authentication log file")
+
+    parser.add_argument(
+        "log_file",
+        help="Input log path, or - to read from standard input",
+    )
+
     parser.add_argument(
         "--rules",
         default="rules",
-        help="Path to Sigma rules directory. Default: rules",
+        help="Sigma rules directory. Default: rules",
     )
+
+    parser.add_argument(
+        "--format",
+        choices=["auto", "jsonl", "authlog", "journal"],
+        default="auto",
+        help="Input format. Default: auto",
+    )
+
+    parser.add_argument(
+        "--config",
+        default="config/default.yml",
+        help="Configuration file. Default: config/default.yml",
+    )
+
+    return parser
+
+
+def main() -> int:
+    """Run LoginHunt and return a process exit code."""
+
+    parser = build_argument_parser()
     args = parser.parse_args()
 
-    events = load_jsonl(args.log_file)
-    rules = load_rules(args.rules)
+    try:
+        config = load_config(args.config)
+        rules = load_rules(args.rules)
+        events = list(iter_events(args.log_file, args.format))
+
+    except LoginHuntInputError as exc:
+        print(f"LoginHunt error: {exc}", file=sys.stderr)
+        return 3
+
+    except KeyboardInterrupt:
+        print("\nLoginHunt stopped by user.", file=sys.stderr)
+        return 130
 
     sigma_findings = run_sigma_style_rules(events, rules)
-    correlation_findings = run_correlation_logic(events)
+    correlation_findings = run_correlation_logic(events, config)
 
-    all_findings = [(rule, event, None) for rule, event in sigma_findings]
+    all_findings: list[
+        tuple[dict[str, Any], dict[str, Any], str | None]
+    ] = [
+        (rule, event, None)
+        for rule, event in sigma_findings
+    ]
+
     all_findings.extend(correlation_findings)
 
     all_findings.sort(
-        key=lambda item: severity_rank(item[0].get("level", "informational")),
+        key=lambda item: severity_rank(
+            item[0].get("level", "informational")
+        ),
         reverse=True,
     )
 
@@ -220,6 +603,8 @@ def main():
     for rule, event, reason in all_findings:
         print_finding(rule, event, reason)
 
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

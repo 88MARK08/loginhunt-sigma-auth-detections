@@ -1,2 +1,4 @@
 pyyaml
 sigma-cli
+colorama
+pytest

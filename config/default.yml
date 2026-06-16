@@ -1,0 +1,32 @@
+correlation:
+  repeated_failures:
+    enabled: true
+    threshold: 5
+    window_seconds: 300
+    level: high
+
+  success_after_failures:
+    enabled: true
+    threshold: 3
+    window_seconds: 600
+    level: high
+
+  multiple_usernames:
+    enabled: true
+    threshold: 3
+    window_seconds: 300
+    level: high
+
+allowlists:
+  apply_to_atomic_rules: false
+  users: []
+  source_ips:
+    - 127.0.0.1
+    - "::1"
+
+noise_reduction:
+  suppress_individual_failed_logins: true
+
+output:
+  min_level: low
+  color: auto

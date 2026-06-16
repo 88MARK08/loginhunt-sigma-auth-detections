@@ -1,0 +1,11 @@
+Jun 16 08:00:00 server1 sshd[1001]: Accepted password for alice from 198.51.100.10 port 55320 ssh2
+Jun 16 08:03:00 server1 sshd[1002]: Accepted password for root from 203.0.113.50 port 44444 ssh2
+Jun 16 08:05:00 server1 sshd[1003]: Failed password for admin from 203.0.113.80 port 55555 ssh2
+Jun 16 08:06:00 server1 sshd[1004]: Failed password for admin from 203.0.113.80 port 55556 ssh2
+Jun 16 08:07:00 server1 sshd[1005]: Failed password for admin from 203.0.113.80 port 55557 ssh2
+Jun 16 08:08:00 server1 sshd[1006]: Accepted password for admin from 203.0.113.80 port 55558 ssh2
+Jun 16 08:12:00 server1 sudo[1007]: pam_unix(sudo:auth): authentication failure; user=bob
+Jun 16 08:15:00 server1 useradd[1008]: new user: name=backupadmin, UID=1002, GID=1002
+Jun 16 08:20:00 server1 sshd[1009]: Failed password for test from 192.0.2.77 port 60001 ssh2
+Jun 16 08:21:00 server1 sshd[1010]: Failed password for oracle from 192.0.2.77 port 60002 ssh2
+Jun 16 08:22:00 server1 sshd[1011]: Failed password for guest from 192.0.2.77 port 60003 ssh2
