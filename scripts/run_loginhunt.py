@@ -16,9 +16,10 @@ import sys
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable, Iterator
 
 import yaml
+from colorama import Fore, Style, init as colorama_init
 
 from parsers import LoginHuntInputError, iter_events
 
@@ -29,6 +30,14 @@ LEVEL_RANK = {
     "medium": 2,
     "high": 3,
     "critical": 4,
+}
+
+LEVEL_COLORS = {
+    "critical": Fore.MAGENTA,
+    "high": Fore.RED,
+    "medium": Fore.YELLOW,
+    "low": Fore.BLUE,
+    "informational": Fore.WHITE,
 }
 
 
@@ -197,21 +206,62 @@ def severity_rank(level: Any) -> int:
     return LEVEL_RANK.get(str(level).lower(), 0)
 
 
+def normalize_level(level: str) -> str:
+    """Validate and normalize a severity level."""
+
+    normalized = level.lower()
+
+    if normalized not in LEVEL_RANK:
+        raise LoginHuntInputError(
+            f"Unsupported severity level: {level}. "
+            f"Choose from: {', '.join(LEVEL_RANK)}"
+        )
+
+    return normalized
+
+
+def should_use_color(mode: str) -> bool:
+    """Determine whether ANSI colors should be emitted."""
+
+    if mode == "always":
+        return True
+
+    if mode == "never":
+        return False
+
+    return sys.stdout.isatty()
+
+
+def colorize_level(level: str, enabled: bool) -> str:
+    """Return a colorized severity label."""
+
+    label = f"[{level.upper()}]"
+
+    if not enabled:
+        return label
+
+    color = LEVEL_COLORS.get(level, "")
+    return f"{color}{label}{Style.RESET_ALL}"
+
+
 def print_finding(
     rule: dict[str, Any],
     event: dict[str, Any],
     reason: str | None = None,
+    *,
+    color_enabled: bool = False,
 ) -> None:
     """Print one SOC-style finding."""
 
-    level = str(rule.get("level", "informational")).upper()
+    level_value = str(rule.get("level", "informational")).lower()
     title = rule.get("title", "Untitled Rule")
     user = event.get("user", "unknown")
     source_ip = event.get("source_ip", "unknown")
     host = event.get("host", "unknown")
     timestamp = event.get("timestamp", "unknown")
+    label = colorize_level(level_value, color_enabled)
 
-    print(f"[{level}] {title}")
+    print(f"{label} {title}")
     print(f"  Time: {timestamp}")
     print(f"  Host: {host}")
     print(f"  User: {user}")
@@ -226,7 +276,7 @@ def print_finding(
 
 
 def run_sigma_style_rules(
-    events: list[dict[str, Any]],
+    events: Iterable[dict[str, Any]],
     rules: list[dict[str, Any]],
 ) -> list[tuple[dict[str, Any], dict[str, Any]]]:
     """Apply all loaded Sigma-style rules to all events."""
@@ -517,6 +567,243 @@ def run_correlation_logic(
     return findings
 
 
+
+def combine_findings(
+    sigma_findings: list[
+        tuple[dict[str, Any], dict[str, Any]]
+    ],
+    correlation_findings: list[
+        tuple[dict[str, Any], dict[str, Any], str]
+    ],
+) -> list[
+    tuple[dict[str, Any], dict[str, Any], str | None]
+]:
+    """Combine and sort atomic and correlation findings."""
+
+    combined: list[
+        tuple[dict[str, Any], dict[str, Any], str | None]
+    ] = [
+        (rule, event, None)
+        for rule, event in sigma_findings
+    ]
+
+    combined.extend(correlation_findings)
+    combined.sort(
+        key=lambda item: severity_rank(
+            item[0].get("level", "informational")
+        ),
+        reverse=True,
+    )
+
+    return combined
+
+
+def filter_findings(
+    findings: Iterable[
+        tuple[dict[str, Any], dict[str, Any], str | None]
+    ],
+    minimum_level: str,
+) -> list[
+    tuple[dict[str, Any], dict[str, Any], str | None]
+]:
+    """Return findings at or above the selected severity."""
+
+    threshold = severity_rank(minimum_level)
+
+    return [
+        finding
+        for finding in findings
+        if severity_rank(
+            finding[0].get("level", "informational")
+        ) >= threshold
+    ]
+
+
+def maximum_correlation_window(config: dict[str, Any]) -> int:
+    """Return the largest configured correlation window."""
+
+    correlation = config.get("correlation", {})
+
+    if not isinstance(correlation, dict):
+        return 600
+
+    windows: list[int] = []
+
+    for settings in correlation.values():
+        if not isinstance(settings, dict):
+            continue
+
+        try:
+            windows.append(
+                int(settings.get("window_seconds", 300))
+            )
+        except (TypeError, ValueError):
+            continue
+
+    return max(windows, default=600)
+
+
+def prune_history(
+    history: list[dict[str, Any]],
+    current_event: dict[str, Any],
+    maximum_window: int,
+) -> list[dict[str, Any]]:
+    """Remove stream events older than the largest correlation window."""
+
+    current_time = event_epoch(current_event)
+
+    if current_time is None:
+        return history[-5000:]
+
+    retained: list[dict[str, Any]] = []
+
+    for old_event in history:
+        old_time = event_epoch(old_event)
+
+        if old_time is None:
+            retained.append(old_event)
+            continue
+
+        if 0 <= current_time - old_time <= maximum_window:
+            retained.append(old_event)
+
+    return retained[-5000:]
+
+
+def stream_finding_key(
+    rule: dict[str, Any],
+    event: dict[str, Any],
+    reason: str | None,
+) -> tuple[str, str, str, str, str]:
+    """Build a stable deduplication key for streaming output."""
+
+    return (
+        str(rule.get("title", "")),
+        str(event.get("timestamp", "")),
+        str(event.get("source_ip", "")),
+        str(event.get("user", "")),
+        str(reason or ""),
+    )
+
+
+def run_stream(
+    event_iterator: Iterator[dict[str, Any]],
+    rules: list[dict[str, Any]],
+    config: dict[str, Any],
+    minimum_level: str,
+    color_enabled: bool,
+) -> int:
+    """Process authentication events as they arrive."""
+
+    history: list[dict[str, Any]] = []
+    reported: set[tuple[str, str, str, str, str]] = set()
+    processed_events = 0
+    displayed_findings = 0
+    maximum_window = maximum_correlation_window(config)
+
+    print("LoginHunt live monitoring started")
+    print(f"Minimum severity: {minimum_level}")
+    print("Press Ctrl+C to stop.\n")
+
+    try:
+        for event in event_iterator:
+            processed_events += 1
+            history.append(event)
+            history = prune_history(
+                history,
+                event,
+                maximum_window,
+            )
+
+            sigma_findings = run_sigma_style_rules(
+                [event],
+                rules,
+            )
+            correlation_findings = run_correlation_logic(
+                history,
+                config,
+            )
+            current_findings = combine_findings(
+                sigma_findings,
+                correlation_findings,
+            )
+            current_findings = filter_findings(
+                current_findings,
+                minimum_level,
+            )
+
+            for rule, matched_event, reason in current_findings:
+                key = stream_finding_key(
+                    rule,
+                    matched_event,
+                    reason,
+                )
+
+                if key in reported:
+                    continue
+
+                reported.add(key)
+                displayed_findings += 1
+                print_finding(
+                    rule,
+                    matched_event,
+                    reason,
+                    color_enabled=color_enabled,
+                )
+
+    except KeyboardInterrupt:
+        print("\nLoginHunt monitoring stopped by user.")
+
+    print("LoginHunt stream summary")
+    print("=" * 45)
+    print(f"Events processed: {processed_events}")
+    print(f"Findings displayed: {displayed_findings}")
+    print("=" * 45)
+
+    return 0
+
+
+def run_batch(
+    events: list[dict[str, Any]],
+    rules: list[dict[str, Any]],
+    config: dict[str, Any],
+    minimum_level: str,
+    color_enabled: bool,
+) -> int:
+    """Run LoginHunt in batch mode."""
+
+    sigma_findings = run_sigma_style_rules(events, rules)
+    correlation_findings = run_correlation_logic(events, config)
+    all_findings = combine_findings(
+        sigma_findings,
+        correlation_findings,
+    )
+    displayed_findings = filter_findings(
+        all_findings,
+        minimum_level,
+    )
+
+    print("LoginHunt Authentication Detection Report")
+    print("=" * 45)
+    print(f"Events analyzed: {len(events)}")
+    print(f"Sigma rules loaded: {len(rules)}")
+    print(f"Findings detected: {len(all_findings)}")
+    print(f"Findings displayed: {len(displayed_findings)}")
+    print(f"Minimum severity: {minimum_level}")
+    print("=" * 45)
+    print("")
+
+    for rule, event, reason in displayed_findings:
+        print_finding(
+            rule,
+            event,
+            reason,
+            color_enabled=color_enabled,
+        )
+
+    return 0
+
+
 def build_argument_parser() -> argparse.ArgumentParser:
     """Create the LoginHunt command-line interface."""
 
@@ -551,11 +838,45 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Configuration file. Default: config/default.yml",
     )
 
+    parser.add_argument(
+        "--min-level",
+        choices=list(LEVEL_RANK),
+        default=None,
+        help=(
+            "Only display findings at or above this severity. "
+            "Defaults to output.min_level in the configuration."
+        ),
+    )
+
+    parser.add_argument(
+        "--color",
+        choices=["auto", "always", "never"],
+        default=None,
+        help=(
+            "Color mode. Defaults to output.color in the "
+            "configuration."
+        ),
+    )
+
+    parser.add_argument(
+        "--no-color",
+        action="store_true",
+        help="Disable terminal colors. Equivalent to --color never.",
+    )
+
+    parser.add_argument(
+        "--stream",
+        action="store_true",
+        help="Process events as they arrive instead of waiting for EOF.",
+    )
+
     return parser
 
 
 def main() -> int:
     """Run LoginHunt and return a process exit code."""
+
+    colorama_init(strip=False)
 
     parser = build_argument_parser()
     args = parser.parse_args()
@@ -563,7 +884,53 @@ def main() -> int:
     try:
         config = load_config(args.config)
         rules = load_rules(args.rules)
-        events = list(iter_events(args.log_file, args.format))
+
+        output_config = config.get("output", {})
+
+        if not isinstance(output_config, dict):
+            output_config = {}
+
+        minimum_level = normalize_level(
+            args.min_level
+            or str(output_config.get("min_level", "low"))
+        )
+
+        color_mode = (
+            "never"
+            if args.no_color
+            else (
+                args.color
+                or str(output_config.get("color", "auto"))
+            )
+        )
+
+        if color_mode not in {"auto", "always", "never"}:
+            raise LoginHuntInputError(
+                f"Unsupported color mode: {color_mode}. "
+                "Choose from: auto, always, never"
+            )
+
+        color_enabled = should_use_color(color_mode)
+        event_iterator = iter_events(args.log_file, args.format)
+
+        if args.stream:
+            return run_stream(
+                event_iterator,
+                rules,
+                config,
+                minimum_level,
+                color_enabled,
+            )
+
+        events = list(event_iterator)
+
+        return run_batch(
+            events,
+            rules,
+            config,
+            minimum_level,
+            color_enabled,
+        )
 
     except LoginHuntInputError as exc:
         print(f"LoginHunt error: {exc}", file=sys.stderr)
@@ -572,38 +939,6 @@ def main() -> int:
     except KeyboardInterrupt:
         print("\nLoginHunt stopped by user.", file=sys.stderr)
         return 130
-
-    sigma_findings = run_sigma_style_rules(events, rules)
-    correlation_findings = run_correlation_logic(events, config)
-
-    all_findings: list[
-        tuple[dict[str, Any], dict[str, Any], str | None]
-    ] = [
-        (rule, event, None)
-        for rule, event in sigma_findings
-    ]
-
-    all_findings.extend(correlation_findings)
-
-    all_findings.sort(
-        key=lambda item: severity_rank(
-            item[0].get("level", "informational")
-        ),
-        reverse=True,
-    )
-
-    print("LoginHunt Authentication Detection Report")
-    print("=" * 45)
-    print(f"Events analyzed: {len(events)}")
-    print(f"Sigma rules loaded: {len(rules)}")
-    print(f"Findings: {len(all_findings)}")
-    print("=" * 45)
-    print("")
-
-    for rule, event, reason in all_findings:
-        print_finding(rule, event, reason)
-
-    return 0
 
 
 if __name__ == "__main__":

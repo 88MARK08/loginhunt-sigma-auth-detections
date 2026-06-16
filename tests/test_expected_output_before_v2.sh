@@ -4,15 +4,11 @@ set -euo pipefail
 
 JSONL_OUTPUT=$(python scripts/run_loginhunt.py \
   sample_logs/auth_events.jsonl \
-  --format auto \
-  --min-level low \
-  --color never)
+  --format auto)
 
 AUTHLOG_OUTPUT=$(python scripts/run_loginhunt.py \
   tests/fixtures/sample_auth.log \
-  --format auto \
-  --min-level low \
-  --color never)
+  --format auto)
 
 check_expected_detections() {
     local output="$1"
@@ -20,9 +16,7 @@ check_expected_detections() {
 
     echo "$output" | grep -F "Events analyzed: 11"
     echo "$output" | grep -F "Sigma rules loaded: 5"
-    echo "$output" | grep -F "Findings detected: 14"
-    echo "$output" | grep -F "Findings displayed: 14"
-    echo "$output" | grep -F "Minimum severity: low"
+    echo "$output" | grep -F "Findings: 14"
 
     echo "$output" | grep -F "Successful SSH Login As Root"
     echo "$output" | grep -F "Failed SSH Login Attempt"

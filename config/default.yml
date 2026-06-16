@@ -18,15 +18,15 @@ correlation:
     level: high
 
 allowlists:
-  apply_to_atomic_rules: false
   users: []
+
   source_ips:
     - 127.0.0.1
     - "::1"
 
 noise_reduction:
-  suppress_individual_failed_logins: true
+  suppress_individual_failed_logins: false
 
 output:
-  min_level: low
+  min_level: medium
   color: auto
